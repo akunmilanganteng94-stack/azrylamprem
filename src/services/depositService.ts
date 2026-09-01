@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   updateDoc,
   query,
   where,
@@ -10,6 +11,7 @@ import {
   runTransaction,
   serverTimestamp,
   onSnapshot,
+  increment,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Deposit, UserProfile } from '../types';
@@ -77,11 +79,17 @@ export async function submitDeposit(
 
 export async function approveDeposit(
   deposit: Deposit,
-  adminUser: { uid: string; email: string }
+  adminUser?: { uid: string; email: string } | string
 ) {
   const depositId = deposit.depositId;
+  const adminEmail =
+    typeof adminUser === 'string'
+      ? adminUser
+      : adminUser?.email || 'apriliansyahazril10@gmail.com';
+  const adminUid =
+    typeof adminUser === 'string' ? 'admin' : adminUser?.uid || 'admin';
 
-  // 1. Update Firestore
+  // 1. Update deposit status in Firestore
   try {
     const depositRef = doc(db, 'deposits', depositId);
     await setDoc(
@@ -89,13 +97,19 @@ export async function approveDeposit(
       {
         ...deposit,
         status: 'APPROVED',
-        processedAt: serverTimestamp(),
-        processedBy: adminUser.email,
+        processedAt: new Date().toISOString(),
+        processedBy: adminEmail,
       },
       { merge: true }
     );
+  } catch (e) {
+    console.warn('Firestore deposit status update warning:', e);
+  }
 
-    // Update user balance in Firestore
+  // 2. Update user balance in Firestore
+  try {
+    let updatedInFirestore = false;
+
     if (deposit.userId) {
       try {
         const userRef = doc(db, 'users', deposit.userId);
@@ -105,28 +119,52 @@ export async function approveDeposit(
           const currBal = Number(uData.balance || 0);
           const currTotal = Number(uData.totalDeposits || 0);
           await updateDoc(userRef, {
-            balance: currBal + deposit.amount,
-            totalDeposits: currTotal + deposit.amount,
+            balance: currBal + Number(deposit.amount),
+            totalDeposits: currTotal + Number(deposit.amount),
             updatedAt: serverTimestamp(),
           });
+          updatedInFirestore = true;
         }
       } catch (uErr) {
-        console.warn('Firestore user balance update warning:', uErr);
+        console.warn('Firestore update by userId failed:', uErr);
+      }
+    }
+
+    if (!updatedInFirestore && deposit.userEmail) {
+      try {
+        const q = query(
+          collection(db, 'users'),
+          where('email', '==', deposit.userEmail.toLowerCase().trim())
+        );
+        const userSnaps = await getDocs(q);
+        for (const uDoc of userSnaps.docs) {
+          const uData = uDoc.data() as UserProfile;
+          const currBal = Number(uData.balance || 0);
+          const currTotal = Number(uData.totalDeposits || 0);
+          await updateDoc(uDoc.ref, {
+            balance: currBal + Number(deposit.amount),
+            totalDeposits: currTotal + Number(deposit.amount),
+            updatedAt: serverTimestamp(),
+          });
+          updatedInFirestore = true;
+        }
+      } catch (qErr) {
+        console.warn('Firestore query by email failed:', qErr);
       }
     }
   } catch (e) {
-    console.warn('Firestore approveDeposit warning, proceeding with local approval:', e);
+    console.warn('Firestore balance update warning, proceeding with local approval:', e);
   }
 
-  // 2. Approve in Local Store
-  approveLocalDeposit(deposit, adminUser.email);
+  // 3. Approve in Local Store (synchronous instant feedback)
+  approveLocalDeposit(deposit, adminEmail);
 
-  // 3. Log audit action
+  // 4. Log audit action
   try {
     const formattedAmount = (Number(deposit?.amount) || 0).toLocaleString('id-ID');
     await logAdminAction(
-      adminUser.uid,
-      adminUser.email,
+      adminUid,
+      adminEmail,
       'APPROVE_DEPOSIT',
       deposit.depositId,
       `Menyetujui deposit ${deposit.depositId} sebesar Rp${formattedAmount} untuk ${deposit.userEmail}`
@@ -138,10 +176,28 @@ export async function approveDeposit(
 
 export async function rejectDeposit(
   deposit: Deposit,
-  adminUser: { uid: string; email: string },
-  reason: string
+  adminUserOrReason: { uid: string; email: string } | string,
+  maybeReason?: string
 ) {
-  const cleanReason = reason?.trim() || 'Pembayaran tidak sesuai atau mutasi tidak ditemukan';
+  let adminEmail = 'apriliansyahazril10@gmail.com';
+  let adminUid = 'admin';
+  let cleanReason = 'Pembayaran tidak sesuai atau mutasi tidak ditemukan';
+
+  if (typeof adminUserOrReason === 'string') {
+    if (maybeReason) {
+      // (deposit, reason, email)
+      cleanReason = adminUserOrReason.trim();
+      adminEmail = maybeReason;
+    } else {
+      // (deposit, email)
+      adminEmail = adminUserOrReason;
+    }
+  } else if (adminUserOrReason) {
+    // (deposit, adminUser, reason)
+    adminEmail = adminUserOrReason.email || adminEmail;
+    adminUid = adminUserOrReason.uid || adminUid;
+    if (maybeReason) cleanReason = maybeReason.trim();
+  }
 
   // 1. Update in Firestore
   try {
@@ -152,8 +208,8 @@ export async function rejectDeposit(
         ...deposit,
         status: 'REJECTED',
         rejectionReason: cleanReason,
-        processedAt: serverTimestamp(),
-        processedBy: adminUser.email,
+        processedAt: new Date().toISOString(),
+        processedBy: adminEmail,
       },
       { merge: true }
     );
@@ -162,14 +218,14 @@ export async function rejectDeposit(
   }
 
   // 2. Reject in Local Store
-  rejectLocalDeposit(deposit, adminUser.email, cleanReason);
+  rejectLocalDeposit(deposit, adminEmail, cleanReason);
 
   // 3. Log audit action
   try {
     const formattedAmount = (Number(deposit?.amount) || 0).toLocaleString('id-ID');
     await logAdminAction(
-      adminUser.uid,
-      adminUser.email,
+      adminUid,
+      adminEmail,
       'REJECT_DEPOSIT',
       deposit.depositId,
       `Menolak deposit ${deposit.depositId} sebesar Rp${formattedAmount} (${deposit.userEmail}). Alasan: ${cleanReason}`

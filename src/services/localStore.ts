@@ -10,62 +10,11 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'am_store_audit_logs',
   DELETED_INVENTORY_IDS: 'am_store_deleted_inv_ids',
   SOLD_INVENTORY_IDS: 'am_store_sold_inv_ids',
-  SEEDED: 'am_store_seeded_v3',
+  SEEDED: 'am_store_zero_stock_v6',
   PASSWORDS: 'am_store_user_passwords',
 };
 
-const INITIAL_INVENTORY: InventoryItem[] = [
-  {
-    inventoryId: 'INV-1001',
-    productId: 'am-premium',
-    gmail: 'am.pro.editor01@gmail.com',
-    generatorLogin: 'https://alightcreative.com/login?token=ampro-9981-token',
-    status: 'AVAILABLE',
-    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-    soldAt: null,
-    orderId: null,
-  },
-  {
-    inventoryId: 'INV-1002',
-    productId: 'am-premium',
-    gmail: 'am.pro.editor02@gmail.com',
-    generatorLogin: 'https://alightcreative.com/login?token=ampro-7721-token',
-    status: 'AVAILABLE',
-    createdAt: new Date(Date.now() - 3600000 * 18).toISOString(),
-    soldAt: null,
-    orderId: null,
-  },
-  {
-    inventoryId: 'INV-1003',
-    productId: 'am-premium',
-    gmail: 'am.vip.creator03@gmail.com',
-    generatorLogin: 'https://alightcreative.com/login?token=amvip-5531-token',
-    status: 'AVAILABLE',
-    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    soldAt: null,
-    orderId: null,
-  },
-  {
-    inventoryId: 'INV-1004',
-    productId: 'am-premium',
-    gmail: 'am.motion.pro04@gmail.com',
-    generatorLogin: 'https://alightcreative.com/login?token=ampro-3341-token',
-    status: 'AVAILABLE',
-    createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-    soldAt: null,
-    orderId: null,
-  },
-  {
-    inventoryId: 'INV-1005',
-    productId: 'am-premium',
-    gmail: 'am.preset.vip05@gmail.com',
-    generatorLogin: 'https://alightcreative.com/login?token=ampreset-1190-token',
-    status: 'AVAILABLE',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    soldAt: null,
-    orderId: null,
-  },
-];
+const INITIAL_INVENTORY: InventoryItem[] = [];
 
 function getLocal<T>(key: string, fallback: T): T {
   try {
@@ -111,10 +60,8 @@ function emitLocalEvent(event: EventType) {
 export function initLocalStore() {
   const isSeeded = localStorage.getItem(STORAGE_KEYS.SEEDED);
   if (!isSeeded) {
-    const existingInv = getLocal<InventoryItem[] | null>(STORAGE_KEYS.INVENTORY, null);
-    if (existingInv === null || existingInv.length === 0) {
-      setLocal(STORAGE_KEYS.INVENTORY, INITIAL_INVENTORY);
-    }
+    // Reset inventory to 0 as requested by user
+    setLocal(STORAGE_KEYS.INVENTORY, []);
     localStorage.setItem(STORAGE_KEYS.SEEDED, 'true');
   }
 
@@ -527,12 +474,21 @@ export function approveLocalDeposit(depositOrId: Deposit | string, adminEmail: s
 
   dep.status = 'APPROVED';
   dep.processedAt = new Date().toISOString();
-  dep.processedBy = adminEmail;
+  dep.processedBy = adminEmail || 'apriliansyahazril10@gmail.com';
 
-  const userTarget = dep.userId || dep.userEmail;
-  if (userTarget && dep.amount > 0) {
+  if (dep.amount > 0) {
     try {
-      updateLocalUserBalance(userTarget, dep.amount);
+      const user =
+        (dep.userId ? getLocalUserById(dep.userId) : null) ||
+        (dep.userEmail ? getLocalUserByEmail(dep.userEmail) : null);
+
+      if (user) {
+        updateLocalUserBalance(user.uid, dep.amount);
+      } else if (dep.userId) {
+        updateLocalUserBalance(dep.userId, dep.amount);
+      } else if (dep.userEmail) {
+        updateLocalUserBalance(dep.userEmail, dep.amount);
+      }
     } catch (e) {
       console.warn('Could not update user balance locally:', e);
     }
@@ -542,12 +498,14 @@ export function approveLocalDeposit(depositOrId: Deposit | string, adminEmail: s
   const formattedApproveAmount = (Number(dep?.amount) || 0).toLocaleString('id-ID');
   addLocalAuditLog(
     'admin-uid',
-    adminEmail,
+    adminEmail || 'admin',
     'APPROVE_DEPOSIT',
     dep.depositId,
     `Menyetujui deposit Rp${formattedApproveAmount} untuk ${dep.userEmail}`
   );
   emitLocalEvent('deposits');
+  emitLocalEvent('users');
+  emitLocalEvent('profile');
 }
 
 export function rejectLocalDeposit(depositOrId: Deposit | string, adminEmail: string, reason: string) {
