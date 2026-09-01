@@ -1,0 +1,6 @@
+{
+  "name": "Alight Motion Premium Store",
+  "description": "Website jual Alight Motion Premium otomatis 24 jam dengan sistem saldo, stok real-time, order instan, dan Admin Panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
