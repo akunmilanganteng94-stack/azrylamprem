@@ -186,10 +186,13 @@ export function AdminPage() {
   // Deposit Actions
   const handleApproveDeposit = async (dep: Deposit) => {
     try {
-      await approveDeposit(dep, userProfile?.email || 'admin');
+      await approveDeposit(dep, {
+        uid: userProfile?.uid || 'admin',
+        email: userProfile?.email || 'apriliansyahazril10@gmail.com',
+      });
       showToast(
         'Deposit Disetujui!',
-        `Saldo ${formatRupiah(dep.amount)} telah otomatis ditambahkan ke ${dep.userName}.`,
+        `Saldo ${formatRupiah(dep.amount)} telah otomatis ditambahkan ke ${dep.userName || dep.userEmail}.`,
         'success'
       );
     } catch (err: any) {
@@ -202,8 +205,11 @@ export function AdminPage() {
     try {
       await rejectDeposit(
         rejectModalDeposit,
-        rejectionReason.trim() || 'Pembayaran tidak sesuai atau mutasi tidak ditemukan.',
-        userProfile?.email || 'admin'
+        {
+          uid: userProfile?.uid || 'admin',
+          email: userProfile?.email || 'apriliansyahazril10@gmail.com',
+        },
+        rejectionReason.trim() || 'Pembayaran tidak sesuai atau mutasi tidak ditemukan.'
       );
       showToast('Deposit Ditolak', `Deposit ${rejectModalDeposit.depositId} telah ditolak.`, 'info');
       setRejectModalDeposit(null);
@@ -571,8 +577,8 @@ export function AdminPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {filteredStock.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-850/50 transition-colors">
+                    {filteredStock.map((item, index) => (
+                      <tr key={item.inventoryId || `stock-${index}`} className="hover:bg-slate-850/50 transition-colors">
                         <td className="p-4 whitespace-nowrap">
                           {item.status === 'AVAILABLE' ? (
                             <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
@@ -593,9 +599,9 @@ export function AdminPage() {
                         <td className="p-4 text-slate-400">
                           {item.status === 'SOLD' ? (
                             <div>
-                              <div className="text-white font-medium">{item.buyerEmail}</div>
+                              <div className="text-white font-medium">{(item as any).buyerEmail || 'Pembeli AM'}</div>
                               <div className="text-[10px] text-slate-500">
-                                Order #{item.orderId?.slice(0, 8)} • {formatDateTime(item.soldAt || '')}
+                                Order #{item.orderId?.slice(0, 8) || 'N/A'} • {formatDateTime(item.soldAt || '')}
                               </div>
                             </div>
                           ) : (
@@ -606,7 +612,7 @@ export function AdminPage() {
                         </td>
                         <td className="p-4 text-right">
                           <button
-                            onClick={() => handleDeleteItem(item.id)}
+                            onClick={() => handleDeleteItem(item.inventoryId)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                             title="Hapus Stok"
                           >
@@ -884,8 +890,8 @@ export function AdminPage() {
               {logs.length === 0 ? (
                 <div className="p-8 text-center text-slate-500">Belum ada audit log.</div>
               ) : (
-                logs.map((log) => (
-                  <div key={log.id} className="p-4 flex items-start gap-3 hover:bg-slate-850/50 transition-colors">
+                logs.map((log, index) => (
+                  <div key={log.logId || log.id || `log-${index}`} className="p-4 flex items-start gap-3 hover:bg-slate-850/50 transition-colors">
                     <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0 mt-0.5">
                       <Activity className="w-4 h-4" />
                     </div>
@@ -895,12 +901,12 @@ export function AdminPage() {
                           {log.action}
                         </span>
                         <span className="text-[11px] text-slate-500">
-                          {formatDateTime(log.timestamp)}
+                          {formatDateTime(log.timestamp || log.createdAt)}
                         </span>
                       </div>
                       <p className="text-slate-300 mt-1">{log.details}</p>
                       <div className="text-[10px] text-slate-500 mt-0.5">
-                        Oleh: {log.performedBy}
+                        Oleh: {log.performedBy || log.adminEmail || 'Admin'}
                       </div>
                     </div>
                   </div>
